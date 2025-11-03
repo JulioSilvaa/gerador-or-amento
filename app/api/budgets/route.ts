@@ -34,6 +34,8 @@ type Budget = {
   total: number;
 };
 
+export const runtime = "nodejs";
+
 export async function POST(req: NextRequest) {
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json(
@@ -81,7 +83,67 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 
-  return Response.json({ ok: true, id: data.number });
+  // Disparo opcional para n8n após salvar com sucesso
+  const n8nUrl = (process.env.N8N_WEBHOOK_URL || "").trim();
+  let n8nNotified = false;
+  let n8nStatusCode: number | null = null;
+  let n8nError: string | null = null;
+  if (n8nUrl) {
+    try {
+      const reqUrl = new URL(req.url);
+      const publicBase = (process.env.PUBLIC_BASE_URL || "").trim();
+      const base =
+        publicBase && /^https?:\/\//i.test(publicBase)
+          ? publicBase.replace(/\/$/, "")
+          : `${reqUrl.protocol}//${reqUrl.host}`;
+      const pdfUrl = `${base}/api/budgets/pdf?number=${encodeURIComponent(
+        body.number
+      )}`;
+
+      const phoneDigits = (body.client?.phone || "").replace(/\D/g, "");
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 7000);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      const token = (process.env.N8N_WEBHOOK_TOKEN || "").trim();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const n8nRes = await fetch(n8nUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ...payload,
+          pdfUrl,
+          client: { ...payload.client, phoneDigits },
+        }),
+        signal: controller.signal,
+      });
+      n8nStatusCode = n8nRes.status;
+      if (!n8nRes.ok) {
+        const txt = await n8nRes.text().catch(() => "<no-body>");
+        n8nError = `n8n respondeu ${n8nRes.status}: ${txt.slice(0, 500)}`;
+        console.warn("[n8n] webhook resposta não OK:", n8nError);
+      } else {
+        n8nNotified = true;
+      }
+      try {
+        clearTimeout(timeout);
+      } catch {}
+    } catch (e) {
+      n8nError = (e as Error)?.message ?? String(e);
+      console.warn("[n8n] webhook falhou:", n8nError);
+    }
+  }
+
+  return Response.json({
+    ok: true,
+    id: data.number,
+    n8nNotified,
+    n8nStatusCode,
+    n8nError,
+  });
 }
 
 export async function GET() {

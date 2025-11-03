@@ -107,6 +107,7 @@ export default function WorkshopBudgetSystem() {
 
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [sendingNumber, setSendingNumber] = useState<string | null>(null);
   // Preview de PDF de orçamentos do histórico
   const [showPdf, setShowPdf] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -140,6 +141,27 @@ export default function WorkshopBudgetSystem() {
       console.error("Erro ao carregar orçamentos:", error);
       setBudgets([]);
       setErrorMsg("Não foi possível carregar orçamentos. Verifique sua conexão e as variáveis do Supabase.");
+    }
+  };
+
+  const resendBudget = async (number: string) => {
+    if (!number) return;
+    try {
+      setSendingNumber(number);
+      const res = await fetch(`/api/budgets/${encodeURIComponent(number)}/send`, { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.ok === false) {
+        const msg = json?.error || "Falha ao reenviar orçamento.";
+        setErrorMsg(String(msg));
+        return;
+      }
+      // feedback de sucesso simples
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 1800);
+    } catch (e: any) {
+      setErrorMsg(e?.message || "Erro ao reenviar orçamento.");
+    } finally {
+      setSendingNumber(null);
     }
   };
 
@@ -276,23 +298,7 @@ export default function WorkshopBudgetSystem() {
       setShowSuccess(true);
       // Recarrega histórico online
       void loadBudgets();
-      // Baixa o PDF gerado pelo servidor
-      try {
-        const pdfRes = await fetch(`/api/budgets/${budgetData.number}/pdf`);
-        if (pdfRes.ok) {
-          const blob = await pdfRes.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `${budgetData.number}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-        }
-      } catch (_) {
-        // silenciosamente ignora falha no download do PDF
-      }
+      // Removido: não baixar PDF automaticamente após enviar
       setTimeout(() => {
         setShowSuccess(false);
         resetForm();
@@ -429,9 +435,20 @@ export default function WorkshopBudgetSystem() {
                   minute: "2-digit",
                 })}
               </p>
-              <p className="text-xs text-gray-600">
-                {budget.items.length} {budget.items.length === 1 ? "item" : "itens"}
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-gray-600">
+                  {budget.items.length} {budget.items.length === 1 ? "item" : "itens"}
+                </p>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); resendBudget(budget.number); }}
+                  disabled={sendingNumber === budget.number}
+                  className={`text-sm px-3 py-1.5 rounded-md border ${sendingNumber === budget.number ? "bg-gray-200 text-gray-500" : "bg-blue-600 text-white hover:bg-blue-700"}`}
+                  title="Reenviar orçamento via WhatsApp (n8n)"
+                >
+                  {sendingNumber === budget.number ? "Enviando..." : "Reenviar"}
+                </button>
+              </div>
             </div>
           </div>
         ))
