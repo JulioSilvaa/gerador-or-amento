@@ -115,12 +115,7 @@ function SearchBar({ value, onChange, onSubmit, onClear, inputRef }: SearchBarPr
             // Reforça a manutenção do foco após re-render
             requestAnimationFrame(() => inputRef?.current?.focus());
           }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              onSubmit();
-            }
-          }}
+          // A busca só deve acontecer ao clicar no botão; Enter não dispara
           placeholder="Buscar por número, cliente, placa ou veículo..."
           aria-label="Buscar orçamentos"
           autoComplete="off"
@@ -156,9 +151,10 @@ type HistoryCardProps = {
   onResend: (number: string) => void;
   sendingNumber: string | null;
   formatCurrency: (v: number) => string;
+  onEdit: (budget: Budget) => void;
 };
 
-function HistoryCard({ budget, onOpen, onResend, sendingNumber, formatCurrency }: HistoryCardProps) {
+function HistoryCard({ budget, onOpen, onResend, sendingNumber, formatCurrency, onEdit }: HistoryCardProps) {
   // Metadados opcionais de reenvio embutidos no JSON da empresa (armazenados no backend)
   const meta = (budget.company as unknown as { _meta?: { lastResentAt?: string; resendCount?: number } })._meta;
   const resendCount = typeof meta?.resendCount === "number" ? meta!.resendCount! : 0;
@@ -194,6 +190,14 @@ function HistoryCard({ budget, onOpen, onResend, sendingNumber, formatCurrency }
         </div>
         <div className="flex items-center gap-3">
           <p className="text-xs text-gray-600">{budget.items.length} {budget.items.length === 1 ? "item" : "itens"}</p>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onEdit(budget); }}
+            className="text-sm px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50"
+            title="Editar orçamento"
+          >
+            Editar
+          </button>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onResend(budget.number); }}
@@ -246,6 +250,8 @@ export default function WorkshopBudgetSystem() {
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Edição ativa
+  const [editing, setEditing] = useState<{ number: string; date: string } | null>(null);
   // Modal de configurações: refs para trap de foco
   const settingsDialogRef = useRef<HTMLDivElement>(null);
   const settingsFirstInputRef = useRef<HTMLInputElement>(null);
@@ -520,6 +526,30 @@ export default function WorkshopBudgetSystem() {
     return `ORC-${Date.now()}`;
   };
 
+  const startEditBudget = (b: Budget) => {
+    setActiveTab("new");
+    // Preenche campos
+    setClientData({
+      name: b.client?.name || "",
+      phone: b.client?.phone || "",
+      vehicle: b.client?.vehicle || "",
+      plate: b.client?.plate || "",
+    });
+    setItems(
+      (b.items || []).map((it) => ({
+        id: Date.now() + Math.floor(Math.random() * 100000),
+        description: it.description,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        displayPrice: new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          .format(it.unitPrice)
+          .replace(".", ","),
+      }))
+    );
+    setEditing({ number: b.number, date: b.date });
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+  };
+
   // Handlers auxiliares (deixam JSX mais limpo)
   const saveCompanySettings = async () => {
     if (!company?.name) {
@@ -609,7 +639,7 @@ export default function WorkshopBudgetSystem() {
     handleSelectLogoFile(file);
   };
   const clearSelectedLogo = () => handleSelectLogoFile(null);
-  const handleSendBudget = async () => {
+  const handleSendBudget = async (silent = false) => {
     const companyInfo: CompanyData = company ?? companyData; // fallback vazio
     if (!companyInfo.name) {
       setErrorMsg("Configure os dados da oficina antes de enviar o orçamento.");
@@ -617,8 +647,8 @@ export default function WorkshopBudgetSystem() {
       return;
     }
     const budgetData: Budget = {
-      number: generateBudgetNumber(),
-      date: new Date().toISOString(),
+      number: editing?.number ?? generateBudgetNumber(),
+      date: editing?.date ?? new Date().toISOString(),
       company: companyInfo,
       client: clientData,
       items: items,
@@ -627,7 +657,7 @@ export default function WorkshopBudgetSystem() {
 
     // Envia para a API que grava no Supabase
     try {
-      const res = await fetch("/api/budgets", {
+      const res = await fetch(`/api/budgets${silent ? "?notify=false" : ""}` , {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(budgetData),
@@ -647,20 +677,22 @@ export default function WorkshopBudgetSystem() {
       }
 
       // Analisa retorno para saber se n8n foi notificado
-      const out = (await res.json().catch(() => ({} as { ok?: boolean; n8nNotified?: boolean; n8nError?: string | null }))) as {
-        ok?: boolean;
-        n8nNotified?: boolean;
-        n8nError?: string | null;
-      };
+      const out = (await res.json().catch(() => ({} as { ok?: boolean; n8nNotified?: boolean; n8nError?: string | null; n8nStatusCode?: number | null; n8nSkipped?: boolean }))) as { ok?: boolean; n8nNotified?: boolean; n8nError?: string | null; n8nStatusCode?: number | null; n8nSkipped?: boolean };
 
-      if (out && out.ok) {
-        if (out.n8nNotified === false) {
-          // Mostra aviso não-bloqueante sobre n8n
-          setErrorMsg(
-            out.n8nError
-              ? `Orçamento salvo, mas n8n não foi notificado: ${out.n8nError}`
-              : "Orçamento salvo, mas n8n não foi notificado. Verifique N8N_WEBHOOK_URL/TOKEN e o fluxo responder rápido."
-          );
+      if (!silent && out?.ok && out.n8nNotified === false && !out?.n8nSkipped) {
+        try {
+          const retry = await fetch(`/api/budgets/${encodeURIComponent(budgetData.number)}/send`, { method: "POST" });
+          if (!retry.ok) {
+            const retryJson = (await retry.json().catch(() => ({} as { error?: string }))) as { error?: string };
+            setErrorMsg(
+              retryJson?.error
+                ? `Orçamento salvo, mas falhou ao notificar o n8n (2ª tentativa): ${retryJson.error}`
+                : `Orçamento salvo, mas falhou ao notificar o n8n (status ${retry.status}).`
+            );
+          }
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : String(e);
+          setErrorMsg(`Orçamento salvo, mas falhou ao notificar o n8n: ${message}`);
         }
       }
 
@@ -671,6 +703,7 @@ export default function WorkshopBudgetSystem() {
       setTimeout(() => {
         setShowSuccess(false);
         resetForm();
+        setEditing(null);
       }, 2000);
     } catch (error) {
       console.error("Erro ao enviar para Supabase:", error);
@@ -820,6 +853,7 @@ export default function WorkshopBudgetSystem() {
                 onResend={resendBudget}
                 sendingNumber={sendingNumber}
                 formatCurrency={formatCurrency}
+                onEdit={startEditBudget}
               />
             ))}
           </>
@@ -1089,6 +1123,20 @@ export default function WorkshopBudgetSystem() {
         {/* Content */}
         {activeTab === "new" ? (
           <div className="space-y-6 pb-8">
+            {editing && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-900 px-4 py-3 flex items-center justify-between">
+                <div className="text-sm">
+                  Editando orçamento <span className="font-semibold">{editing.number}</span> (data original {new Date(editing.date).toLocaleDateString("pt-BR")})
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditing(null)}
+                  className="px-3 py-1.5 rounded-md border bg-white hover:bg-gray-50 text-sm"
+                >
+                  Cancelar edição
+                </button>
+              </div>
+            )}
             {/* Dados do Cliente */}
             <div className="bg-white rounded-lg shadow-md p-4 md:p-6">
               <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center">
@@ -1221,12 +1269,20 @@ export default function WorkshopBudgetSystem() {
                 Visualizar Preview
               </button>
               <button
-                onClick={handleSendBudget}
+                onClick={() => handleSendBudget(false)}
                 className="py-3 md:py-4 bg-linear-to-r from-blue-600 to-blue-700 text-white rounded-lg font-bold hover:from-blue-700 hover:to-blue-800 shadow-lg transition flex items-center justify-center text-sm md:text-base"
               >
                 <Send className="mr-2 h-4 w-4 md:h-5 md:w-5" />
-                Enviar Orçamento
+                {editing ? "Atualizar Orçamento" : "Enviar Orçamento"}
               </button>
+              {editing && (
+                <button
+                  onClick={() => handleSendBudget(true)}
+                  className="py-3 md:py-4 border-2 border-gray-300 text-gray-700 rounded-lg font-bold hover:bg-gray-50 transition flex items-center justify-center text-sm md:text-base"
+                >
+                  Salvar (sem enviar)
+                </button>
+              )}
             </div>
           </div>
         ) : (

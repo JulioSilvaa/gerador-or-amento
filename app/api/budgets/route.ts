@@ -37,6 +37,11 @@ type Budget = {
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  const url = new URL(req.url);
+  // notify=true (default). Se notify=false, não dispara webhook do n8n
+  const notifyParam = url.searchParams.get("notify");
+  const shouldNotify =
+    notifyParam == null ? true : /^(1|true|yes)$/i.test(notifyParam);
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json(
       {
@@ -83,12 +88,13 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 
-  // Disparo opcional para n8n após salvar com sucesso
+  // Disparo opcional para n8n após salvar com sucesso (pode ser suprimido via notify=false)
   const n8nUrl = (process.env.N8N_WEBHOOK_URL || "").trim();
   let n8nNotified = false;
   let n8nStatusCode: number | null = null;
   let n8nError: string | null = null;
-  if (n8nUrl) {
+  const n8nSkipped = !shouldNotify;
+  if (n8nUrl && shouldNotify) {
     try {
       const reqUrl = new URL(req.url);
       const publicBase = (process.env.PUBLIC_BASE_URL || "").trim();
@@ -143,6 +149,7 @@ export async function POST(req: NextRequest) {
     n8nNotified,
     n8nStatusCode,
     n8nError,
+    n8nSkipped,
   });
 }
 
