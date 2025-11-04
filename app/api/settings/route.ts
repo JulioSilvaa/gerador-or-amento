@@ -32,17 +32,17 @@ function getCfg() {
 }
 
 function toCompany(
-  row: any,
+  row: Record<string, unknown>,
   cols: ReturnType<typeof getCfg>["cols"]
 ): CompanyData {
-  const phoneValue = row?.[cols.whatsapp] || row?.[cols.phone] || "";
+  const phoneValue = (row[cols.whatsapp] ?? row[cols.phone] ?? "") as unknown;
   return {
-    name: String(row?.[cols.name] ?? ""),
-    cnpj: String(row?.[cols.cnpj] ?? ""),
-    phone: String(phoneValue ?? ""),
-    email: String(row?.[cols.email] ?? ""),
-    address: String(row?.[cols.address] ?? ""),
-    logo: String(row?.[cols.logoUrl] ?? ""),
+    name: String(row[cols.name] ?? ""),
+    cnpj: String(row[cols.cnpj] ?? ""),
+    phone: String((phoneValue as string) ?? ""),
+    email: String(row[cols.email] ?? ""),
+    address: String(row[cols.address] ?? ""),
+    logo: String(row[cols.logoUrl] ?? ""),
   };
 }
 
@@ -71,8 +71,8 @@ export async function GET() {
       cols.createdAt,
     ].join(",");
 
-    let data: any = null;
-    let error: any = null;
+    let data: Record<string, unknown> | null = null;
+    let error: { message: string } | null = null;
     if (recordId) {
       const res = await supabase
         .from(table)
@@ -80,7 +80,7 @@ export async function GET() {
         .eq(cols.id, recordId)
         .limit(1)
         .maybeSingle();
-      data = res.data;
+      data = (res.data as unknown as Record<string, unknown>) ?? null;
       error = res.error;
     } else {
       const res = await supabase
@@ -89,7 +89,7 @@ export async function GET() {
         .order(cols.createdAt, { ascending: false })
         .limit(1)
         .maybeSingle();
-      data = res.data;
+      data = (res.data as unknown as Record<string, unknown>) ?? null;
       error = res.error;
     }
     if (error) {
@@ -103,11 +103,12 @@ export async function GET() {
     if (!data) return Response.json({ company: null });
     return Response.json({
       company: toCompany(data, cols),
-      id: (data as any)[cols.id],
+      id: (data as Record<string, unknown>)[cols.id],
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     return Response.json(
-      { error: e?.message || "Erro ao consultar configurações" },
+      { error: message || "Erro ao consultar configurações" },
       { status: 500 }
     );
   }
@@ -149,10 +150,15 @@ export async function PUT(req: NextRequest) {
         .order(cols.createdAt, { ascending: false })
         .limit(1)
         .maybeSingle();
-      currentId = (data as any)?.[cols.id] ?? null;
+      if (data && typeof data === "object") {
+        const v = (data as Record<string, unknown>)[cols.id];
+        currentId = typeof v === "string" ? v : null;
+      } else {
+        currentId = null;
+      }
     }
 
-    const rowPayload: Record<string, any> = {
+    const rowPayload: Record<string, unknown> = {
       [cols.name]: body.name,
       [cols.cnpj]: body.cnpj,
       [cols.email]: body.email,
@@ -180,9 +186,10 @@ export async function PUT(req: NextRequest) {
       );
     }
     return Response.json({ ok: true });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     return Response.json(
-      { error: e?.message || "Erro ao salvar configurações" },
+      { error: message || "Erro ao salvar configurações" },
       { status: 500 }
     );
   }

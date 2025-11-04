@@ -2,6 +2,7 @@
 // @ts-expect-error: o build standalone não possui declarações de tipos
 import PDFDocument from "pdfkit/js/pdfkit.standalone.js";
 import { getSupabaseServer } from "@/lib/supabaseServer";
+import { NextRequest } from "next/server";
 
 export const runtime = "nodejs"; // garante Node APIs para PDFKit
 
@@ -184,11 +185,12 @@ async function generatePdfBuffer(b: Budget): Promise<Buffer> {
 }
 
 export async function GET(
-  _req: Request,
-  { params }: { params: { number: string } }
+  _req: NextRequest,
+  ctx: { params: Promise<{ number: string }> }
 ) {
   const url = new URL(_req.url);
-  let number = (params?.number ?? url.searchParams.get("number") ?? "").trim();
+  const p = await ctx.params;
+  let number = (p?.number ?? url.searchParams.get("number") ?? "").trim();
   // Fallback: extrai o número do pathname caso o params venha vazio
   if (!number) {
     const m = url.pathname.match(/\/api\/budgets\/([^/]+)\/pdf\/?$/);
@@ -231,9 +233,10 @@ export async function GET(
         "Content-Disposition": `attachment; filename=${number}.pdf`,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     return new Response(
-      JSON.stringify({ error: e?.message ?? "Erro ao gerar PDF" }),
+      JSON.stringify({ error: message || "Erro ao gerar PDF" }),
       { status: 500 }
     );
   }

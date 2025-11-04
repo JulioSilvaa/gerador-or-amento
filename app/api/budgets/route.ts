@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
   let body: Budget;
   try {
     body = (await req.json()) as Budget;
-  } catch (e) {
+  } catch {
     return Response.json({ error: "JSON inválido" }, { status: 400 });
   }
 

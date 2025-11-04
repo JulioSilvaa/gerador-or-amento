@@ -37,8 +37,8 @@ export async function GET() {
       } else {
         rowExists = Boolean(data);
       }
-    } catch (e: any) {
-      error = e?.message || String(e);
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : String(e);
     }
 
     return Response.json({
@@ -47,10 +47,8 @@ export async function GET() {
       checks: { tableOk, columnOk, rowExists },
       error,
     });
-  } catch (e: any) {
-    return Response.json(
-      { ok: false, error: e?.message || String(e) },
-      { status: 500 }
-    );
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    return Response.json({ ok: false, error: message }, { status: 500 });
   }
 }

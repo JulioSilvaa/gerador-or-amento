@@ -1,4 +1,13 @@
 import { getSupabaseServer } from "@/lib/supabaseServer";
+import { NextRequest } from "next/server";
+
+type BudgetRow = {
+  client?: {
+    phone?: string;
+    [k: string]: unknown;
+  } | null;
+  [k: string]: unknown;
+};
 
 export const runtime = "nodejs";
 
@@ -10,11 +19,12 @@ function mask(value: string | undefined, keep = 8) {
 }
 
 export async function POST(
-  req: Request,
-  { params }: { params: { number: string } }
+  req: NextRequest,
+  ctx: { params: Promise<{ number: string }> }
 ) {
   const url = new URL(req.url);
-  let number = (params?.number || url.searchParams.get("number") || "").trim();
+  const p = await ctx.params;
+  let number = (p?.number || url.searchParams.get("number") || "").trim();
   // Fallback: extrai do pathname /api/budgets/{number}/send
   if (!number) {
     const parts = url.pathname.split("/").filter(Boolean);
@@ -79,14 +89,13 @@ export async function POST(
       number
     )}`;
 
-    const phoneDigits = String((data as any)?.client?.phone || "").replace(
-      /\D/g,
-      ""
-    );
+    const phoneDigits = String(
+      (data as BudgetRow)?.client?.phone || ""
+    ).replace(/\D/g, "");
     const payload = {
       ...data,
       pdfUrl,
-      client: { ...(data as any).client, phoneDigits },
+      client: { ...((data as BudgetRow).client ?? {}), phoneDigits },
     };
 
     const controller = new AbortController();
@@ -140,9 +149,10 @@ export async function POST(
       { ok: true, n8nNotified: true, n8nStatusCode: res.status },
       { status: 200 }
     );
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     return Response.json(
-      { ok: false, error: e?.message || "Falha ao reenviar orçamento" },
+      { ok: false, error: message || "Falha ao reenviar orçamento" },
       { status: 500 }
     );
   }

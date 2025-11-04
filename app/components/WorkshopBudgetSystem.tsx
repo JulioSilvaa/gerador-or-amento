@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
   Trash2,
@@ -198,69 +198,7 @@ function HistoryCard({ budget, onOpen, onResend, sendingNumber, formatCurrency }
   );
 }
 
-type ItemRowProps = {
-  item: Item;
-  index: number;
-  totalItems: number;
-  onRemove: (id: number) => void;
-  onUpdate: (id: number, field: keyof Item, value: unknown) => void;
-  onPriceChange: (id: number, value: string) => void;
-  formatCurrency: (v: number) => string;
-};
-
-function ItemRow({ item, index, totalItems, onRemove, onUpdate, onPriceChange, formatCurrency }: ItemRowProps) {
-  return (
-    <div className="border rounded-lg p-4 bg-gray-50">
-      <div className="flex justify-between items-center mb-3">
-        <span className="text-sm font-semibold text-gray-600">Item {index + 1}</span>
-        {totalItems > 1 && (
-          <button onClick={() => onRemove(item.id)} className="text-red-500 hover:text-red-700">
-            <Trash2 size={18} />
-          </button>
-        )}
-      </div>
-      <div className="space-y-3">
-        <label htmlFor={`item-desc-${item.id}`} className="sr-only">Descrição do serviço/peça</label>
-        <input
-          id={`item-desc-${item.id}`}
-          type="text"
-          placeholder="Descrição do serviço/peça"
-          value={item.description}
-          onChange={(e) => onUpdate(item.id, "description", e.target.value)}
-          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-        />
-        <div className="grid grid-cols-2 gap-3">
-          <label htmlFor={`item-qty-${item.id}`} className="sr-only">Quantidade</label>
-          <input
-            id={`item-qty-${item.id}`}
-            type="number"
-            placeholder="Quantidade"
-            min={1}
-            value={item.quantity}
-            onChange={(e) => onUpdate(item.id, "quantity", parseInt(e.target.value, 10) || 1)}
-            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600">R$</span>
-            <label htmlFor={`item-price-${item.id}`} className="sr-only">Valor unitário</label>
-            <input
-              id={`item-price-${item.id}`}
-              type="text"
-              placeholder="0,00"
-              value={item.displayPrice}
-              onChange={(e) => onPriceChange(item.id, e.target.value)}
-              className="w-full pl-12 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-        <div className="text-right">
-          <span className="text-sm text-gray-600">Subtotal: </span>
-          <span className="font-bold text-green-600">{formatCurrency(item.quantity * item.unitPrice)}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
+ 
 
 export default function WorkshopBudgetSystem() {
   const [activeTab, setActiveTab] = useState<"new" | "history">("new");
@@ -311,6 +249,33 @@ export default function WorkshopBudgetSystem() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
+  // Carrega lista de orçamentos (estável entre renders)
+  const loadBudgets = useCallback(async () => {
+    try {
+      const res = await fetch("/api/budgets");
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({} as { error?: string }))) as {
+          error?: string;
+        };
+        const message = (err?.error as string) ?? "Falha ao carregar orçamentos";
+        setErrorMsg(
+          /Supabase/i.test(message)
+            ? "Erro ao carregar orçamentos. Conecte o Supabase no .env.local e reinicie o servidor."
+            : message
+        );
+        setBudgets([]);
+        return;
+      }
+      const list = (await res.json()) as Budget[];
+      setBudgets(list ?? []);
+      setErrorMsg(null);
+    } catch (error) {
+      console.error("Erro ao carregar orçamentos:", error);
+      setBudgets([]);
+      setErrorMsg("Não foi possível carregar orçamentos. Verifique sua conexão e as variáveis do Supabase.");
+    }
+  }, []);
+
   useEffect(() => {
     // Carregar configurações da oficina
     (async () => {
@@ -332,8 +297,7 @@ export default function WorkshopBudgetSystem() {
     })();
     // Carregar histórico de orçamentos
     loadBudgets();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadBudgets]);
 
   useEffect(() => {
     if (activeTab === "history") {
@@ -377,6 +341,16 @@ export default function WorkshopBudgetSystem() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [showSettings]);
 
+  // Fecha o modal de PDF e limpa estados relacionados
+  const closePdfPreview = useCallback(() => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    setPdfUrl(null);
+    setPdfNumber(null);
+    setShowPdf(false);
+    setPdfError(null);
+    setPdfLoading(false);
+  }, [pdfUrl]);
+
   // Trap de foco e ESC para o modal de PDF
   useEffect(() => {
     if (!showPdf) return;
@@ -410,38 +384,19 @@ export default function WorkshopBudgetSystem() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [showPdf]);
+  }, [showPdf, closePdfPreview]);
 
-  const loadBudgets = async () => {
-    try {
-      const res = await fetch("/api/budgets");
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({} as any));
-        const message = (err?.error as string) ?? "Falha ao carregar orçamentos";
-        setErrorMsg(
-          /Supabase/i.test(message)
-            ? "Erro ao carregar orçamentos. Conecte o Supabase no .env.local e reinicie o servidor."
-            : message
-        );
-        setBudgets([]);
-        return;
-      }
-      const list = (await res.json()) as Budget[];
-      setBudgets(list ?? []);
-      setErrorMsg(null);
-    } catch (error) {
-      console.error("Erro ao carregar orçamentos:", error);
-      setBudgets([]);
-      setErrorMsg("Não foi possível carregar orçamentos. Verifique sua conexão e as variáveis do Supabase.");
-    }
-  };
+  
 
   const resendBudget = async (number: string) => {
     if (!number) return;
     try {
       setSendingNumber(number);
       const res = await fetch(`/api/budgets/${encodeURIComponent(number)}/send`, { method: "POST" });
-      const json = await res.json().catch(() => ({}));
+      const json = (await res.json().catch(() => ({} as { ok?: boolean; error?: string }))) as {
+        ok?: boolean;
+        error?: string;
+      };
       if (!res.ok || json?.ok === false) {
         const msg = json?.error || "Falha ao reenviar orçamento.";
         setErrorMsg(String(msg));
@@ -450,8 +405,9 @@ export default function WorkshopBudgetSystem() {
       // feedback de sucesso simples
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 1800);
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Erro ao reenviar orçamento.");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setErrorMsg(message || "Erro ao reenviar orçamento.");
     } finally {
       setSendingNumber(null);
     }
@@ -471,27 +427,23 @@ export default function WorkshopBudgetSystem() {
   // Usar a rota estável por query string (evita problemas com params dinâmicos)
   const res = await fetch(`/api/budgets/pdf?number=${encodeURIComponent(number)}`);
       if (!res.ok) {
-        const err = await res.json().catch(() => ({} as any));
+        const err = (await res.json().catch(() => ({} as { error?: string }))) as {
+          error?: string;
+        };
         throw new Error(err?.error ?? `Falha ao gerar PDF (status ${res.status})`);
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
-    } catch (e: any) {
-      setPdfError(e?.message ?? "Não foi possível carregar o PDF.");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setPdfError(message ?? "Não foi possível carregar o PDF.");
     } finally {
       setPdfLoading(false);
     }
   };
 
-  const closePdfPreview = () => {
-    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-    setPdfUrl(null);
-    setPdfNumber(null);
-    setShowPdf(false);
-    setPdfError(null);
-    setPdfLoading(false);
-  };
+  
 
   const addItem = () => {
     setItems((prev) => [
@@ -569,14 +521,18 @@ export default function WorkshopBudgetSystem() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(company),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || (json as any)?.ok === false) {
-        setErrorMsg((json as any)?.error || "Falha ao salvar configurações.");
+      const json = (await res.json().catch(() => ({} as { ok?: boolean; error?: string }))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || json?.ok === false) {
+        setErrorMsg(json?.error || "Falha ao salvar configurações.");
         return;
       }
       setShowSettings(false);
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Erro ao salvar configurações.");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setErrorMsg(message || "Erro ao salvar configurações.");
     } finally {
       setSavingSettings(false);
     }
@@ -589,18 +545,23 @@ export default function WorkshopBudgetSystem() {
       const fd = new FormData();
       fd.append("file", selectedLogoFile, selectedLogoFile.name);
       const res = await fetch("/api/settings/logo", { method: "POST", body: fd });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || (json as any)?.ok === false) {
-        setErrorMsg((json as any)?.error || "Falha ao enviar logo.");
+      const json = (await res.json().catch(() => ({} as { ok?: boolean; error?: string; url?: string }))) as {
+        ok?: boolean;
+        error?: string;
+        url?: string;
+      };
+      if (!res.ok || json?.ok === false) {
+        setErrorMsg(json?.error || "Falha ao enviar logo.");
         return;
       }
-      const url: string | undefined = (json as any)?.url;
+      const url: string | undefined = json?.url;
       if (url) setCompany({ ...(company ?? companyData), logo: url });
       setSelectedLogoFile(null);
       if (logoPreview) URL.revokeObjectURL(logoPreview);
       setLogoPreview(null);
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Erro ao enviar logo.");
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setErrorMsg(message || "Erro ao enviar logo.");
     } finally {
       setUploadingLogo(false);
     }
@@ -630,7 +591,9 @@ export default function WorkshopBudgetSystem() {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = (await res.json().catch(() => ({} as { error?: string }))) as {
+          error?: string;
+        };
         const msg = err?.error ?? `Falha ao salvar no servidor (status ${res.status})`;
         setErrorMsg(
           /Supabase/i.test(String(msg))
@@ -776,7 +739,7 @@ export default function WorkshopBudgetSystem() {
         if (list.length === 0) {
           return (
             <div className="text-center py-12 text-gray-500">
-              <p>Nenhum orçamento encontrado para "{searchQuery}"</p>
+              <p>Nenhum orçamento encontrado para &quot;{searchQuery}&quot;</p>
             </div>
           );
         }

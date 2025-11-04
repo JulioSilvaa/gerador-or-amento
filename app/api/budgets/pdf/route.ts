@@ -221,9 +221,10 @@ export async function GET(req: Request) {
         "Content-Disposition": `attachment; filename=${number}.pdf`,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     return new Response(
-      JSON.stringify({ error: e?.message ?? "Erro ao gerar PDF" }),
+      JSON.stringify({ error: message || "Erro ao gerar PDF" }),
       { status: 500 }
     );
   }

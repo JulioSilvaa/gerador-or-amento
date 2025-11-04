@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     const file = form.get("file") as File | null;
     let filename = String(form.get("filename") || "logo");
 
-    if (!file || typeof (file as any).arrayBuffer !== "function") {
+    if (!file || typeof (file as File).arrayBuffer !== "function") {
       return Response.json(
         { error: "Envie o arquivo no campo 'file'" },
         { status: 400 }
@@ -86,10 +86,15 @@ export async function POST(req: Request) {
         .order(cols.createdAt, { ascending: false })
         .limit(1)
         .maybeSingle();
-      currentId = (data as any)?.[cols.id] ?? null;
+      if (data && typeof data === "object") {
+        const v = (data as Record<string, unknown>)[cols.id];
+        currentId = typeof v === "string" ? v : null;
+      } else {
+        currentId = null;
+      }
     }
 
-    let upsertErr = null as any;
+    let upsertErr: { message: string } | null = null;
     if (currentId) {
       const { error } = await supabase
         .from(table)
@@ -113,9 +118,10 @@ export async function POST(req: Request) {
     }
 
     return Response.json({ ok: true, url: publicUrl });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     return Response.json(
-      { error: e?.message || "Erro ao fazer upload da logo" },
+      { error: message || "Erro ao fazer upload da logo" },
       { status: 500 }
     );
   }

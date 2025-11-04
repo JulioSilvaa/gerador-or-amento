@@ -67,14 +67,15 @@ export async function POST(req: Request) {
       },
       { status: res.ok ? 200 : 502 }
     );
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     try {
       clearTimeout(timeout);
     } catch {}
     return Response.json(
       {
         ok: false,
-        error: e?.message || String(e),
+        error: message,
       },
       { status: 500 }
     );
