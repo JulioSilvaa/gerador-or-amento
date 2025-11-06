@@ -9,7 +9,6 @@ import {
   History,
   X,
   Eye,
-  Building2,
   Phone,
   Settings,
   Search,
@@ -167,7 +166,7 @@ function HistoryCard({ budget, onOpen, onResend, sendingNumber, formatCurrency, 
       tabIndex={0}
       onClick={() => onOpen(budget.number)}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(budget.number); }}
-  className="bg-white border rounded-lg p-3 md:p-4 shadow-sm hover:shadow-md transition cursor-pointer hover:border-blue-200"
+      className="bg-white border rounded-lg p-3 md:p-4 shadow-sm hover:shadow-md transition cursor-pointer hover:border-blue-200"
     >
       <div className="flex justify-between items-start mb-2">
         <div>
@@ -213,7 +212,7 @@ function HistoryCard({ budget, onOpen, onResend, sendingNumber, formatCurrency, 
   );
 }
 
- 
+
 
 export default function WorkshopBudgetSystem() {
   const [activeTab, setActiveTab] = useState<"new" | "history">("new");
@@ -267,6 +266,26 @@ export default function WorkshopBudgetSystem() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
+  // Helpers para validar dados vindos do banco (evita exibir caminhos locais acidentais)
+  const isValidLogoUrl = (u: string | undefined | null) => {
+    if (!u) return false;
+    const s = String(u).trim();
+    // aceita URLs públicas, caminhos absolutos do site e data URLs
+    return /^(https?:)?\/\//i.test(s) || s.startsWith("/") || s.startsWith("data:");
+  };
+
+  const sanitizeDisplayName = (n: string | undefined | null) => {
+    if (!n) return "Gerador de Orçamentos";
+    const s = String(n).trim();
+    // se parecer com um caminho local (contiver backslash ou 'C:\') ou um path temporário, fallback
+    if (/^[A-Za-z]:\\/.test(s) || s.includes('\\') || s.includes('/') && s.includes('Temp') || s.startsWith('file:')) {
+      return "Gerador de Orçamentos";
+    }
+    // comprimento razoável
+    if (s.length === 0 || s.length > 80) return "Gerador de Orçamentos";
+    return s;
+  };
+
   // Carrega lista de orçamentos (estável entre renders)
   const loadBudgets = useCallback(async () => {
     try {
@@ -311,7 +330,7 @@ export default function WorkshopBudgetSystem() {
             });
           }
         }
-      } catch {}
+      } catch { }
     })();
     // Carregar histórico de orçamentos
     loadBudgets();
@@ -404,7 +423,7 @@ export default function WorkshopBudgetSystem() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [showPdf, closePdfPreview]);
 
-  
+
 
   const resendBudget = async (number: string) => {
     if (!number) return;
@@ -442,8 +461,8 @@ export default function WorkshopBudgetSystem() {
     setPdfLoading(true);
     setPdfError(null);
     try {
-  // Usar a rota estável por query string (evita problemas com params dinâmicos)
-  const res = await fetch(`/api/budgets/pdf?number=${encodeURIComponent(number)}`);
+      // Usar a rota estável por query string (evita problemas com params dinâmicos)
+      const res = await fetch(`/api/budgets/pdf?number=${encodeURIComponent(number)}`);
       if (!res.ok) {
         const err = (await res.json().catch(() => ({} as { error?: string }))) as {
           error?: string;
@@ -461,7 +480,7 @@ export default function WorkshopBudgetSystem() {
     }
   };
 
-  
+
 
   const addItem = () => {
     setItems((prev) => [
@@ -492,10 +511,10 @@ export default function WorkshopBudgetSystem() {
       prev.map((item) =>
         item.id === id
           ? {
-              ...item,
-              unitPrice: parseFloat(numericValue),
-              displayPrice: numericValue.replace(".", ","),
-            }
+            ...item,
+            unitPrice: parseFloat(numericValue),
+            displayPrice: numericValue.replace(".", ","),
+          }
           : item
       )
     );
@@ -657,7 +676,7 @@ export default function WorkshopBudgetSystem() {
 
     // Envia para a API que grava no Supabase
     try {
-      const res = await fetch(`/api/budgets${silent ? "?notify=false" : ""}` , {
+      const res = await fetch(`/api/budgets${silent ? "?notify=false" : ""}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(budgetData),
@@ -819,12 +838,12 @@ export default function WorkshopBudgetSystem() {
         const list = !q
           ? budgets
           : budgets.filter((b) => {
-              const inNumber = normalize(b.number).includes(q);
-              const inClient = [b.client?.name, b.client?.phone, b.client?.vehicle, b.client?.plate]
-                .some((v) => normalize(v).includes(q));
-              const inItems = (b.items || []).some((it) => normalize(it.description).includes(q));
-              return inNumber || inClient || inItems;
-            });
+            const inNumber = normalize(b.number).includes(q);
+            const inClient = [b.client?.name, b.client?.phone, b.client?.vehicle, b.client?.plate]
+              .some((v) => normalize(v).includes(q));
+            const inItems = (b.items || []).some((it) => normalize(it.description).includes(q));
+            return inNumber || inClient || inItems;
+          });
 
         if (budgets.length === 0) {
           return (
@@ -863,25 +882,33 @@ export default function WorkshopBudgetSystem() {
   );
 
   return (
-  <div className="min-h-screen bg-linear-to-br from-blue-50 via-white to-gray-50">
+    <div className="min-h-screen bg-linear-to-br from-blue-50 via-white to-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b sticky top-0 z-40">
         <div className="max-w-4xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              {((company ?? companyData).logo ? (
-                // Logo fornecida
-                <img
-                  src={(company ?? companyData).logo}
-                  alt={(company ?? companyData).name || "Logo da oficina"}
-                  className="h-10 w-auto rounded-sm object-contain border border-gray-200 bg-white"
-                />
-              ) : (
-                // Fallback ícone
-                <Building2 className="text-blue-600 shrink-0 h-7 w-7 md:h-8 md:w-8" />
-              ))}
+              {(() => {
+                const logoUrl = (company ?? companyData).logo;
+                const useLogo = isValidLogoUrl(logoUrl);
+                return useLogo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={String(logoUrl)}
+                    alt={String((company ?? companyData).name || "Logo da oficina")}
+                    className="h-10 w-auto rounded-sm object-contain border border-gray-200 bg-white"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src="/budget-logo.png"
+                    alt="Logo padrão"
+                    className="h-10 w-auto rounded-sm object-contain border border-gray-200 bg-white"
+                  />
+                );
+              })()}
               <div className="min-w-0">
-                <h1 className="text-2xl font-bold text-gray-800 truncate">{(company ?? companyData).name || "Dados da oficina não configurados"}</h1>
+                <h1 className="text-2xl font-bold text-gray-800 truncate">{sanitizeDisplayName((company ?? companyData).name) || "Dados da oficina não configurados"}</h1>
                 <p className="text-sm text-gray-600">Sistema de Orçamentos</p>
               </div>
             </div>
@@ -982,6 +1009,7 @@ export default function WorkshopBudgetSystem() {
                     >
                       <div className="flex items-center gap-3">
                         {(logoPreview || company?.logo) ? (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={logoPreview || company?.logo || ''}
                             alt="Pré-visualização da logo"
@@ -1098,22 +1126,20 @@ export default function WorkshopBudgetSystem() {
         <div className="flex gap-2 mb-6">
           <button
             onClick={() => setActiveTab("new")}
-            className={`flex-1 py-2.5 md:py-3 px-4 rounded-lg font-semibold transition text-sm md:text-base ${
-              activeTab === "new"
-                ? "bg-blue-600 text-white shadow-md"
-                : "bg-white text-gray-600 hover:bg-gray-50"
-            }`}
+            className={`flex-1 py-2.5 md:py-3 px-4 rounded-lg font-semibold transition text-sm md:text-base ${activeTab === "new"
+              ? "bg-blue-600 text-white shadow-md"
+              : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
           >
             <FileText size={20} className="inline mr-2" />
             Novo Orçamento
           </button>
           <button
             onClick={() => setActiveTab("history")}
-            className={`flex-1 py-2.5 md:py-3 px-4 rounded-lg font-semibold transition text-sm md:text-base ${
-              activeTab === "history"
-                ? "bg-blue-600 text-white shadow-md"
-                : "bg-white text-gray-600 hover:bg-gray-50"
-            }`}
+            className={`flex-1 py-2.5 md:py-3 px-4 rounded-lg font-semibold transition text-sm md:text-base ${activeTab === "history"
+              ? "bg-blue-600 text-white shadow-md"
+              : "bg-white text-gray-600 hover:bg-gray-50"
+              }`}
           >
             <History size={20} className="inline mr-2" />
             Histórico
